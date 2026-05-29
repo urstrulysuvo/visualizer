@@ -1,13 +1,16 @@
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'dart:ui' as ui;
+import 'image_loader.dart';
+import 'video_exporter.dart';
+
 import 'wav_generator.dart';
 import 'wav_decoder.dart';
-import 'visualizers/nebula_painter.dart';
-import 'visualizers/horizon_painter.dart';
 import 'visualizers/vortex_painter.dart';
 
 void main() {
@@ -35,7 +38,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-enum VisualizerMode { nebula, horizon, vortex }
+
 
 class ColorPreset {
   final String name;
@@ -69,16 +72,20 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   double _volume = 0.8;
+  DateTime? _lastPositionUpdateTime;
 
   String _trackName = "demo_synth.wav";
+  final String _albumName = "Solomun Set";
+  ui.Image? _albumArtImage;
   bool _isRealAnalysis = true;
+  String _currentAudioPath = "";
   AudioWaveData _waveData = AudioWaveData.empty();
-  VisualizerMode _currentMode = VisualizerMode.nebula;
   int _selectedPresetIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    _loadAlbumArt();
     
     // Initialize audio player
     _audioPlayer = AudioPlayer();
@@ -96,6 +103,7 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
       if (mounted) {
         setState(() {
           _position = p;
+          _lastPositionUpdateTime = DateTime.now();
         });
       }
     });
@@ -121,8 +129,10 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
         setState(() {
           _isPlaying = s == PlayerState.playing;
           if (_isPlaying) {
+            _lastPositionUpdateTime = DateTime.now();
             _animationController.repeat();
           } else {
+            _lastPositionUpdateTime = null;
             _animationController.stop();
           }
         });
@@ -138,6 +148,15 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
     _audioPlayer.dispose();
     _animationController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAlbumArt() async {
+    try {
+      final img = await loadNetworkImage("https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80");
+      if (mounted) setState(() { _albumArtImage = img; });
+    } catch (e) {
+      debugPrint("Failed to load album art: $e");
+    }
   }
 
   Future<void> _loadDefaultTrack() async {
@@ -164,6 +183,7 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
           _trackName = "demo_synth.wav (Procedural Synth)";
           _isRealAnalysis = true;
           _isLoading = false;
+          _currentAudioPath = defaultWavPath;
         });
       }
     } catch (e) {
@@ -215,6 +235,7 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
           _isRealAnalysis = isWav;
           _position = Duration.zero;
           _isLoading = false;
+          _currentAudioPath = filePath;
         });
         
         // Auto play on select
@@ -238,6 +259,81 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
       _audioPlayer.pause();
     } else {
       _audioPlayer.resume();
+    }
+  }
+
+  Future<void> _exportVideo() async {
+    if (_currentAudioPath.isEmpty || _duration.inMilliseconds == 0) return;
+    _audioPlayer.pause();
+
+    final progressNotifier = ValueNotifier<double>(0.0);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E0A30),
+        title: const Text("Exporting 1080p Video", style: TextStyle(color: Colors.white)),
+        content: ValueListenableBuilder<double>(
+          valueListenable: progressNotifier,
+          builder: (context, progress, _) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(
+                  value: progress,
+                  backgroundColor: Colors.white12,
+                  color: Colors.purpleAccent,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "${(progress * 100).toStringAsFixed(1)}% Complete",
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  "Rendering raw frames at 60 FPS offline. This may take a moment...",
+                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final outputPath = "${appDocDir.path}/visualizer_export.mp4";
+
+      final file = File(outputPath);
+      if (file.existsSync()) file.deleteSync();
+
+      await VideoExporter.exportVideo(
+        waveData: _waveData,
+        preset: colorPresets[_selectedPresetIndex],
+        trackName: _trackName,
+        albumName: _albumName,
+        albumArt: _albumArtImage,
+        durationMs: _duration.inMilliseconds,
+        volume: _volume,
+        audioFilePath: _currentAudioPath,
+        outputPath: outputPath,
+        onProgress: (p) {
+          progressNotifier.value = p;
+        },
+      );
+      
+      if (mounted) {
+        Navigator.of(context).pop(); 
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Export complete! Saved to: $outputPath")));
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop(); 
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Export failed: $e")));
+      }
     }
   }
 
@@ -345,32 +441,52 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
             ),
           ],
         ),
-        ElevatedButton.icon(
-          onPressed: _pickAndLoadAudio,
-          icon: const Icon(Icons.library_music_rounded, size: 18),
-          label: const Text(
-            "LOAD AUDIO FILE",
-            style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.0),
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.white.withValues(alpha: 0.08),
-            foregroundColor: Colors.white,
-            elevation: 0,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+        Row(
+          children: [
+            ElevatedButton.icon(
+              onPressed: _exportVideo,
+              icon: const Icon(Icons.download_rounded, size: 18),
+              label: const Text(
+                "EXPORT 1080P",
+                style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.0),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple.withValues(alpha: 0.3),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Colors.purpleAccent.withValues(alpha: 0.5)),
+                ),
+              ),
             ),
-          ),
+            const SizedBox(width: 12),
+            ElevatedButton.icon(
+              onPressed: _pickAndLoadAudio,
+              icon: const Icon(Icons.library_music_rounded, size: 18),
+              label: const Text(
+                "LOAD AUDIO FILE",
+                style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.0),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: 0.08),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 
   Widget _buildVisualizerContainer(ColorPreset preset) {
-    // Read the current audio data frame based on position
-    final frame = _waveData.getFrameAt(_position.inMilliseconds);
-
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -390,34 +506,29 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
         child: AnimatedBuilder(
           animation: _animationController,
           builder: (context, child) {
-            // Draw visualizer matching chosen mode
-            CustomPainter painter;
-            switch (_currentMode) {
-              case VisualizerMode.nebula:
-                painter = NebulaPainter(
-                  frame: frame,
-                  animationTime: _animationController.value * 2 * pi * 4.0, // Scale phase for good speed
-                  primaryColor: preset.primary,
-                  secondaryColor: preset.secondary,
-                );
-                break;
-              case VisualizerMode.horizon:
-                painter = HorizonPainter(
-                  frame: frame,
-                  animationTime: _animationController.value * 2 * pi,
-                  primaryColor: preset.primary,
-                  secondaryColor: preset.secondary,
-                );
-                break;
-              case VisualizerMode.vortex:
-                painter = VortexPainter(
-                  frame: frame,
-                  animationTime: _animationController.value * 2 * pi * 2.0,
-                  primaryColor: preset.primary,
-                  secondaryColor: preset.secondary,
-                );
-                break;
+            // Calculate exact position for smooth 60fps bouncing
+            Duration currentPos = _position;
+            if (_isPlaying && _lastPositionUpdateTime != null) {
+              final elapsed = DateTime.now().difference(_lastPositionUpdateTime!);
+              currentPos = _position + elapsed;
             }
+            
+            // Read the raw audio data frame and scale it by volume
+            final rawFrame = _waveData.getFrameAt(currentPos.inMilliseconds);
+            final frame = WaveFrame(
+              bass: rawFrame.bass * _volume,
+              mid: rawFrame.mid * _volume,
+              treble: rawFrame.treble * _volume,
+              full: rawFrame.full * _volume,
+            );
+
+            // Draw visualizer matching chosen mode
+            final CustomPainter painter = VortexPainter(
+              frame: frame,
+              animationTime: _animationController.value * 2 * pi * 2.0,
+              primaryColor: preset.primary,
+              secondaryColor: preset.secondary,
+            );
 
             return RepaintBoundary(
               child: CustomPaint(
@@ -516,7 +627,14 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
               value: progress,
               onChanged: (val) {
                 final targetMs = (val * _duration.inMilliseconds).toInt();
-                _audioPlayer.seek(Duration(milliseconds: targetMs));
+                final newPos = Duration(milliseconds: targetMs);
+                _audioPlayer.seek(newPos);
+                setState(() {
+                  _position = newPos;
+                  if (_isPlaying) {
+                    _lastPositionUpdateTime = DateTime.now();
+                  }
+                });
               },
             ),
           ),
@@ -625,85 +743,15 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
           const Divider(color: Colors.white10, height: 1),
           const SizedBox(height: 16),
 
-          // Visualizer Style Switcher & Theme Presets
+          // Theme Presets
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Style Selector Segmented Control
-              _buildVisualizerSelector(preset),
-
               // Theme Dot Pickers
               _buildThemePicker(),
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildVisualizerSelector(ColorPreset preset) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.black26,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: VisualizerMode.values.map((mode) {
-          final isSelected = _currentMode == mode;
-          String label;
-          IconData icon;
-          switch (mode) {
-            case VisualizerMode.nebula:
-              label = "Nebula";
-              icon = Icons.blur_on_rounded;
-              break;
-            case VisualizerMode.horizon:
-              label = "Horizon";
-              icon = Icons.grid_view_rounded;
-              break;
-            case VisualizerMode.vortex:
-              label = "Vortex";
-              icon = Icons.donut_large_rounded;
-              break;
-          }
-
-          return GestureDetector(
-            onTap: () {
-              setState(() {
-                _currentMode = mode;
-              });
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected ? Colors.white.withValues(alpha: 0.08) : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-                border: isSelected
-                    ? Border.all(color: preset.primary.withValues(alpha: 0.4))
-                    : Border.all(color: Colors.transparent),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    icon,
-                    size: 14,
-                    color: isSelected ? preset.secondary : Colors.white60,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      color: isSelected ? Colors.white : Colors.white60,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }).toList(),
       ),
     );
   }

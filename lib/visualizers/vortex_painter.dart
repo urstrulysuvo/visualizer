@@ -19,7 +19,16 @@ class VortexPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final minDim = min(size.width, size.height);
-    final double innerRadius = minDim * 0.18 * (1.0 + 0.15 * frame.bass);
+    
+    // Global bouncy scale based on bass to make the whole visualizer pulse
+    final double bounceScale = 1.0 + (0.25 * frame.bass);
+    
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.scale(bounceScale);
+    canvas.translate(-center.dx, -center.dy);
+
+    final double innerRadius = minDim * 0.18 * (1.0 + 0.10 * frame.bass);
     final double maxBarHeight = minDim * 0.22;
 
     // Glowing core in the center
@@ -45,6 +54,8 @@ class VortexPainter extends CustomPainter {
 
     // Draw radial equalizer bars
     _drawRadialBars(canvas, center, innerRadius, maxBarHeight);
+    
+    canvas.restore(); // Restore from global bounce scale
   }
 
   void _drawScopeRings(Canvas canvas, Offset center, double innerRadius) {
@@ -123,9 +134,10 @@ class VortexPainter extends CustomPainter {
         barColor = Color.lerp(primaryColor, secondaryColor, t.clamp(0.0, 1.0))!;
       }
 
-      // Procedural noise to add detailed variations
-      double microFluctuation = 0.85 + 0.15 * sin(angle * 12 + animationTime * 8.0);
-      double barLength = maxBarHeight * intensity * microFluctuation * (0.2 + 0.8 * (i % 3 == 0 ? 0.9 : 0.7));
+      // Procedural variation so bars aren't completely identical, 
+      // but the length is strictly scaled by the audio intensity (gain).
+      double variation = 0.7 + 0.3 * sin(angle * 24 + animationTime * 2.0);
+      double barLength = maxBarHeight * intensity * variation;
       
       // Ensure a minimum height for visual aesthetics
       barLength = max(4.0, barLength);
