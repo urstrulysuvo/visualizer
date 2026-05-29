@@ -12,6 +12,7 @@ import 'video_exporter.dart';
 import 'wav_generator.dart';
 import 'wav_decoder.dart';
 import 'visualizers/vortex_painter.dart';
+import 'visualizers/neon_wave_painter.dart';
 
 void main() {
   runApp(const MyApp());
@@ -39,6 +40,8 @@ class MyApp extends StatelessWidget {
 }
 
 
+
+enum VisualizerMode { vortex, neonWave }
 
 class ColorPreset {
   final String name;
@@ -80,6 +83,7 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
   bool _isRealAnalysis = true;
   String _currentAudioPath = "";
   AudioWaveData _waveData = AudioWaveData.empty();
+  VisualizerMode _currentMode = VisualizerMode.neonWave;
   int _selectedPresetIndex = 0;
 
   @override
@@ -311,6 +315,7 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
       if (file.existsSync()) file.deleteSync();
 
       await VideoExporter.exportVideo(
+        mode: _currentMode,
         waveData: _waveData,
         preset: colorPresets[_selectedPresetIndex],
         trackName: _trackName,
@@ -523,12 +528,25 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
             );
 
             // Draw visualizer matching chosen mode
-            final CustomPainter painter = VortexPainter(
-              frame: frame,
-              animationTime: _animationController.value * 2 * pi * 2.0,
-              primaryColor: preset.primary,
-              secondaryColor: preset.secondary,
-            );
+            CustomPainter painter;
+            switch (_currentMode) {
+              case VisualizerMode.vortex:
+                painter = VortexPainter(
+                  frame: frame,
+                  animationTime: _animationController.value * 2 * pi * 2.0,
+                  primaryColor: preset.primary,
+                  secondaryColor: preset.secondary,
+                );
+                break;
+              case VisualizerMode.neonWave:
+                painter = NeonWavePainter(
+                  frame: frame,
+                  animationTime: _animationController.value * 2 * pi,
+                  primaryColor: preset.primary,
+                  secondaryColor: preset.secondary,
+                );
+                break;
+            }
 
             return RepaintBoundary(
               child: CustomPaint(
@@ -743,15 +761,81 @@ class _VisualizerDashboardState extends State<VisualizerDashboard>
           const Divider(color: Colors.white10, height: 1),
           const SizedBox(height: 16),
 
-          // Theme Presets
+          // Visualizer Style Switcher & Theme Presets
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              // Style Selector Segmented Control
+              _buildVisualizerSelector(preset),
+
               // Theme Dot Pickers
               _buildThemePicker(),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildVisualizerSelector(ColorPreset preset) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.black26,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: VisualizerMode.values.map((mode) {
+          final isSelected = _currentMode == mode;
+          String label;
+          IconData icon;
+          switch (mode) {
+            case VisualizerMode.vortex:
+              label = "Vortex";
+              icon = Icons.donut_large_rounded;
+              break;
+            case VisualizerMode.neonWave:
+              label = "Neon Wave";
+              icon = Icons.waves_rounded;
+              break;
+          }
+
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _currentMode = mode;
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white.withValues(alpha: 0.08) : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                border: isSelected
+                    ? Border.all(color: preset.primary.withValues(alpha: 0.4))
+                    : Border.all(color: Colors.transparent),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    icon,
+                    size: 14,
+                    color: isSelected ? preset.secondary : Colors.white60,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isSelected ? Colors.white : Colors.white60,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }

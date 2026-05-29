@@ -6,9 +6,11 @@ import 'package:flutter/material.dart';
 import 'wav_decoder.dart';
 import 'main.dart'; 
 import 'visualizers/vortex_painter.dart';
+import 'visualizers/neon_wave_painter.dart';
 
 class VideoExporter {
   static Future<void> exportVideo({
+    required VisualizerMode mode,
     required AudioWaveData waveData,
     required ColorPreset preset,
     required String trackName,
@@ -78,14 +80,27 @@ class VideoExporter {
       canvas.drawRect(const Rect.fromLTWH(0, 0, width, height), bgPaint);
 
       // 2. Draw Visualizer
-      final CustomPainter painter = VortexPainter(
-        frame: frame,
-        animationTime: (timeMs / 1000.0) * 2 * pi * 2.0,
-        primaryColor: preset.primary,
-        secondaryColor: preset.secondary,
-      );
+      CustomPainter? painter;
+      switch (mode) {
+        case VisualizerMode.vortex:
+          painter = VortexPainter(
+            frame: frame,
+            animationTime: (timeMs / 1000.0) * 2 * pi * 2.0,
+            primaryColor: preset.primary,
+            secondaryColor: preset.secondary,
+          );
+          break;
+        case VisualizerMode.neonWave:
+          painter = NeonWavePainter(
+            frame: frame,
+            animationTime: (timeMs / 1000.0) * 2 * pi,
+            primaryColor: preset.primary,
+            secondaryColor: preset.secondary,
+          );
+          break;
+      }
       
-      painter.paint(canvas, const Size(width, height));
+      painter!.paint(canvas, const Size(width, height));
 
       final picture = recorder.endRecording();
       final img = await picture.toImage(width.toInt(), height.toInt());
